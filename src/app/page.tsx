@@ -21,6 +21,7 @@ import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import StockLookup from "@/components/StockLookup";
+import StyledMarkdown from "@/components/StyledMarkdown";
 
 interface Message {
   id: string;
@@ -860,7 +861,7 @@ export default function Home() {
                         )}
                       </div>
                     )}
-                    <div className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</div>
+                    <StyledMarkdown content={msg.content} />
                   </div>
                 </div>
               ))
