@@ -21,7 +21,12 @@ export async function POST(request: NextRequest) {
 
     if (isComparison) {
       // Multi-file comparison prompt
-      prompt = `You are a professional financial analyst. Compare the following datasets and provide insights.
+      prompt = `You are a professional financial analyst. Your job is to ANALYZE data and provide INSIGHTS in plain English.
+
+DO NOT write code. DO NOT write Python. DO NOT write scripts.
+Instead, provide a text-based analysis with your findings.
+
+Compare the following datasets:
 
 ${allFiles.map((f: { name: string; data: string }, i: number) => `
 --- FILE ${i + 1}: ${f.name} ---
@@ -30,25 +35,40 @@ ${f.data}
 
 QUESTION: ${question}
 
-Provide a detailed comparison including:
-1. Key differences between datasets
-2. Performance comparison
-3. Notable trends in each dataset
-4. Recommendations
+Provide your analysis as a human-readable report with:
+1. **Summary** - Key differences between datasets
+2. **Performance** - Which dataset performs better and why
+3. **Trends** - Notable patterns in each dataset
+4. **Recommendations** - Actionable insights
 
-Use markdown formatting for better readability.`;
+Use markdown formatting (bold, lists, tables) but NO CODE BLOCKS.`;
     } else {
       // Single file analysis prompt
-      prompt = `You are a professional financial analyst. Analyze the following data and answer the question.
+      prompt = `You are a professional financial analyst. Your job is to ANALYZE data and provide INSIGHTS in plain English.
+
+IMPORTANT RULES:
+- DO NOT write code
+- DO NOT write Python scripts
+- DO NOT show calculations in code format
+- Instead, EXPLAIN your findings in plain English
+- Use markdown for formatting (bold, lists, tables)
+
+Analyze this financial data:
 
 FILE: ${fileName || "data.csv"}
 
-DATA (CSV format):
+DATA:
 ${data}
 
 QUESTION: ${question}
 
-Provide a clear, detailed analysis. Use markdown formatting for better readability (tables, bold text, lists, etc.).`;
+Provide your analysis as a professional report:
+1. **Key Findings** - What the data shows
+2. **Metrics** - Important numbers and what they mean
+3. **Trends** - Patterns you observe
+4. **Recommendations** - What actions to take
+
+Write in clear, simple language that a business person can understand.`;
     }
 
     const response = await fetch(OPENROUTER_URL, {
