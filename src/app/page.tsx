@@ -1,27 +1,93 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 
 interface Message {
+  id: string;
   role: "user" | "assistant";
   content: string;
+  timestamp: Date;
+  model?: string;
 }
 
-interface DataPreview {
+interface DataFile {
+  id: string;
+  name: string;
+  data: string;
   columns: string[];
   rows: number;
   preview: string[][];
+  parsedData: Record<string, string | number>[];
 }
+
+interface AnalysisHistory {
+  id: string;
+  fileName: string;
+  question: string;
+  response: string;
+  timestamp: Date;
+  model: string;
+}
+
+const AI_MODELS = [
+  { id: "google/gemma-3n-e2b-it:free", name: "Gemma 3N", description: "Fast & efficient" },
+  { id: "qwen/qwen3-coder:free", name: "Qwen 3 Coder", description: "Great for analysis" },
+  { id: "openrouter/free", name: "Auto Select", description: "Best available" },
+  { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B", description: "Most powerful" },
+  { id: "mistralai/mistral-nemo:free", name: "Mistral Nemo", description: "Balanced" },
+];
+
+const COLORS = ["#3fb950", "#d4a853", "#58a6ff", "#f85149", "#a371f7", "#3fb950"];
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [dataPreview, setDataPreview] = useState<DataPreview | null>(null);
-  const [fileName, setFileName] = useState<string>("");
-  const [rawData, setRawData] = useState<string>("");
+  const [files, setFiles] = useState<DataFile[]>([]);
+  const [activeFileId, setActiveFileId] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState(AI_MODELS[0].id);
+  const [showModelSelector, setShowModelSelector] = useState(false);
+  const [history, setHistory] = useState<AnalysisHistory[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [chartData, setChartData] = useState<Record<string, unknown>[]>([]);
+  const [chartType, setChartType] = useState<"bar" | "line" | "pie">("bar");
+  const [showCharts, setShowCharts] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const activeFile = files.find((f) => f.id === activeFileId);
+
+  // Load history from localStorage
+  useEffect(() => {
+    const savedHistory = localStorage.getItem("financeAnalysisHistory");
+    if (savedHistory) {
+      setHistory(JSON.parse(savedHistory));
+    }
+  }, []);
+
+  // Save history to localStorage
+  useEffect(() => {
+    localStorage.setItem("financeAnalysisHistory", JSON.stringify(history));
+  }, [history]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -31,43 +97,97 @@ export default function Home() {
     scrollToBottom();
   }, [messages]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setFileName(file.name);
-    setIsLoading(true);
-
-    const text = await file.text();
-    setRawData(text);
-
+  const parseCSV = (text: string): Record<string, string | number>[] => {
     const lines = text.split("\n").filter((line) => line.trim());
-    const headers = lines[0].split(",");
-    const previewRows = lines.slice(1, 6).map((line) => line.split(","));
+    if (lines.length < 2) return [];
 
-    setDataPreview({
-      columns: headers,
-      rows: lines.length - 1,
-      preview: previewRows,
+    const headers = lines[0].split(",").map((h) => h.trim());
+    const data = lines.slice(1).map((line) => {
+      const values = line.split(",");
+      const row: Record<string, string | number> = {};
+      headers.forEach((header, i) => {
+        const val = values[i]?.trim() || "";
+        const num = parseFloat(val);
+        row[header] = isNaN(num) ? val : num;
+      });
+      return row;
     });
+    return data;
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    for (const file of Array.from(fileList)) {
+      const text = await file.text();
+      const lines = text.split("\n").filter((line) => line.trim());
+      const headers = lines[0].split(",").map((h) => h.trim());
+      const previewRows = lines.slice(1, 6).map((line) => line.split(","));
+      const parsedData = parseCSV(text);
+
+      const newFile: DataFile = {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        name: file.name,
+        data: text,
+        columns: headers,
+        rows: lines.length - 1,
+        preview: previewRows,
+        parsedData,
+      };
+
+      setFiles((prev) => [...prev, newFile]);
+      setActiveFileId(newFile.id);
+
+      // Auto-generate chart data from numeric columns
+      if (parsedData.length > 0) {
+        const numericCols = headers.filter((h) =>
+          parsedData.every((row) => typeof row[h] === "number")
+        );
+        if (numericCols.length > 0) {
+          setChartData(
+            parsedData.slice(0, 10).map((row, i) => {
+              const chartRow: Record<string, unknown> = { name: row[headers[0]] || `Row ${i + 1}` };
+              numericCols.slice(0, 4).forEach((col) => {
+                chartRow[col] = row[col];
+              });
+              return chartRow;
+            })
+          );
+        }
+      }
+    }
 
     setMessages((prev) => [
       ...prev,
       {
+        id: Date.now().toString(),
         role: "assistant",
-        content: `📈 **Data Loaded Successfully**\n\n**File:** ${file.name}\n**Records:** ${(lines.length - 1).toLocaleString()}\n**Fields:** ${headers.length}\n\nYour financial data is ready for analysis. Ask me anything!`,
+        content: `📈 **File Loaded:** ${fileList[0].name}\n\nYou now have ${files.length + 1} file(s) loaded. Select which one to analyze.`,
+        timestamp: new Date(),
       },
     ]);
+  };
 
-    setIsLoading(false);
+  const removeFile = (fileId: string) => {
+    setFiles((prev) => prev.filter((f) => f.id !== fileId));
+    if (activeFileId === fileId) {
+      setActiveFileId(files.length > 1 ? files.find((f) => f.id !== fileId)?.id || null : null);
+    }
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !activeFile) return;
 
-    const userMessage = input.trim();
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: input.trim(),
+      timestamp: new Date(),
+    };
+
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: userMessage }]);
+    setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
 
     try {
@@ -75,36 +195,179 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question: userMessage,
-          data: rawData,
-          fileName,
+          question: userMessage.content,
+          data: activeFile.data,
+          fileName: activeFile.name,
+          model: selectedModel,
+          allFiles: files.map((f) => ({ name: f.name, data: f.data })),
         }),
       });
 
       const data = await response.json();
 
-      if (data.error) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: `❌ Error: ${data.error}` },
-        ]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: data.response },
-        ]);
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: data.error ? `❌ Error: ${data.error}` : data.response,
+        timestamp: new Date(),
+        model: selectedModel,
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      // Save to history
+      if (!data.error) {
+        const historyEntry: AnalysisHistory = {
+          id: Date.now().toString(),
+          fileName: activeFile.name,
+          question: userMessage.content,
+          response: data.response,
+          timestamp: new Date(),
+          model: selectedModel,
+        };
+        setHistory((prev) => [historyEntry, ...prev].slice(0, 50)); // Keep last 50
       }
     } catch {
       setMessages((prev) => [
         ...prev,
         {
+          id: (Date.now() + 1).toString(),
           role: "assistant",
           content: "❌ Connection error. Please try again.",
+          timestamp: new Date(),
         },
       ]);
     }
 
     setIsLoading(false);
+  };
+
+  const exportToPDF = () => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // Title
+    doc.setFontSize(20);
+    doc.setTextColor(63, 185, 80);
+    doc.text("Financial Analysis Report", pageWidth / 2, 20, { align: "center" });
+
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Generated on ${new Date().toLocaleDateString()}`, pageWidth / 2, 28, { align: "center" });
+
+    let yPos = 40;
+
+    // File info
+    if (activeFile) {
+      doc.setFontSize(12);
+      doc.setTextColor(0);
+      doc.text(`Data File: ${activeFile.name}`, 14, yPos);
+      yPos += 7;
+      doc.text(`Records: ${activeFile.rows} | Fields: ${activeFile.columns.length}`, 14, yPos);
+      yPos += 15;
+    }
+
+    // Messages/Analysis
+    doc.setFontSize(14);
+    doc.text("Analysis", 14, yPos);
+    yPos += 10;
+
+    messages.forEach((msg) => {
+      if (yPos > 270) {
+        doc.addPage();
+        yPos = 20;
+      }
+
+      doc.setFontSize(10);
+      doc.setTextColor(msg.role === "user" ? 100 : 0);
+
+      const roleLabel = msg.role === "user" ? "You" : "FinanceAI";
+      doc.setFont(undefined, "bold");
+      doc.text(`${roleLabel}:`, 14, yPos);
+      doc.setFont(undefined, "normal");
+
+      yPos += 6;
+
+      const lines = doc.splitTextToSize(msg.content, pageWidth - 28);
+      lines.forEach((line: string) => {
+        if (yPos > 270) {
+          doc.addPage();
+          yPos = 20;
+        }
+        doc.text(line, 14, yPos);
+        yPos += 5;
+      });
+      yPos += 5;
+    });
+
+    doc.save(`financial-analysis-${Date.now()}.pdf`);
+  };
+
+  const exportToExcel = () => {
+    if (!activeFile) return;
+
+    const workbook = XLSX.utils.book_new();
+
+    // Original data sheet
+    const dataSheet = XLSX.utils.aoa_to_string;
+    const wsData = activeFile.data.split("\n").map((line) => line.split(","));
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    XLSX.utils.book_append_sheet(workbook, ws, "Data");
+
+    // Analysis sheet
+    const analysisData = messages.map((msg) => ({
+      Role: msg.role,
+      Content: msg.content.substring(0, 500),
+      Timestamp: new Date(msg.timestamp).toLocaleString(),
+    }));
+    const analysisWs = XLSX.utils.json_to_sheet(analysisData);
+    XLSX.utils.book_append_sheet(workbook, analysisWs, "Analysis");
+
+    const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([excelBuffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    saveAs(blob, `financial-analysis-${Date.now()}.xlsx`);
+  };
+
+  const loadFromHistory = (entry: AnalysisHistory) => {
+    setMessages([
+      {
+        id: Date.now().toString(),
+        role: "user",
+        content: entry.question,
+        timestamp: new Date(entry.timestamp),
+      },
+      {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: entry.response,
+        timestamp: new Date(entry.timestamp),
+        model: entry.model,
+      },
+    ]);
+    setShowHistory(false);
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    localStorage.removeItem("financeAnalysisHistory");
+  };
+
+  const compareFiles = async () => {
+    if (files.length < 2) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: "assistant",
+          content: "⚠️ Please upload at least 2 files to compare.",
+          timestamp: new Date(),
+        },
+      ]);
+      return;
+    }
+
+    setInput("Compare all uploaded files and highlight key differences");
+    sendMessage();
   };
 
   const sampleQuestions = [
@@ -114,7 +377,6 @@ export default function Home() {
     "🏆 Top performing segments",
   ];
 
-  // Mock ticker data
   const tickers = [
     { symbol: "REVENUE", change: "+12.5%", up: true },
     { symbol: "PROFIT", change: "+8.3%", up: true },
@@ -129,14 +391,8 @@ export default function Home() {
         <div className="flex ticker-scroll whitespace-nowrap py-2">
           {[...tickers, ...tickers].map((t, i) => (
             <div key={i} className="flex items-center gap-2 px-6">
-              <span className="text-sm font-medium text-[#e6edf3]">
-                {t.symbol}
-              </span>
-              <span
-                className={`text-sm font-mono ${
-                  t.up ? "text-[#3fb950]" : "text-[#f85149]"
-                }`}
-              >
+              <span className="text-sm font-medium text-[#e6edf3]">{t.symbol}</span>
+              <span className={`text-sm font-mono ${t.up ? "text-[#3fb950]" : "text-[#f85149]"}`}>
                 {t.change}
               </span>
             </div>
@@ -148,21 +404,10 @@ export default function Home() {
       <header className="border-b border-[#30363d] px-6 py-4 bg-[#161b22]">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
-            {/* Logo */}
             <div className="relative">
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#3fb950] to-[#238636] flex items-center justify-center glow-green">
-                <svg
-                  className="w-6 h-6 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
               <div className="absolute -top-1 -right-1 w-3 h-3 bg-[#3fb950] rounded-full animate-pulse-green"></div>
@@ -174,44 +419,118 @@ export default function Home() {
                   ANALYST
                 </span>
               </h1>
-              <p className="text-xs text-[#8b949e]">
-                AI-Powered Financial Intelligence
-              </p>
+              <p className="text-xs text-[#8b949e]">AI-Powered Financial Intelligence</p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Market Status */}
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#238636]/10 border border-[#238636]/30">
-              <div className="w-2 h-2 rounded-full bg-[#3fb950] animate-pulse"></div>
-              <span className="text-xs text-[#3fb950] font-medium">
-                Ready to Analyze
-              </span>
+            {/* Model Selector */}
+            <div className="relative">
+              <button
+                onClick={() => setShowModelSelector(!showModelSelector)}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#21262d] border border-[#30363d] hover:border-[#3fb950]/50 transition-all"
+              >
+                <svg className="w-4 h-4 text-[#8b949e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <span className="text-sm text-[#e6edf3]">{AI_MODELS.find((m) => m.id === selectedModel)?.name}</span>
+                <svg className="w-4 h-4 text-[#8b949e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showModelSelector && (
+                <div className="absolute right-0 top-full mt-2 w-64 rounded-xl bg-[#161b22] border border-[#30363d] shadow-xl z-50 animate-fade-in">
+                  <div className="p-2">
+                    {AI_MODELS.map((model) => (
+                      <button
+                        key={model.id}
+                        onClick={() => {
+                          setSelectedModel(model.id);
+                          setShowModelSelector(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-lg transition-all ${
+                          selectedModel === model.id
+                            ? "bg-[#3fb950]/20 border border-[#3fb950]/30"
+                            : "hover:bg-[#21262d]"
+                        }`}
+                      >
+                        <div className="text-sm font-medium text-[#e6edf3]">{model.name}</div>
+                        <div className="text-xs text-[#8b949e]">{model.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
+            {/* History */}
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#21262d] border border-[#30363d] hover:border-[#d4a853]/50 transition-all"
+            >
+              <svg className="w-4 h-4 text-[#8b949e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span className="text-sm text-[#e6edf3]">History</span>
+            </button>
+
+            {/* Charts Toggle */}
+            {chartData.length > 0 && (
+              <button
+                onClick={() => setShowCharts(!showCharts)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${
+                  showCharts
+                    ? "bg-[#58a6ff]/20 border-[#58a6ff]/50 text-[#58a6ff]"
+                    : "bg-[#21262d] border-[#30363d] hover:border-[#58a6ff]/50"
+                }`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                <span className="text-sm">Charts</span>
+              </button>
+            )}
+
+            {/* Export */}
+            {messages.length > 0 && (
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={exportToPDF}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#21262d] border border-[#30363d] hover:border-[#f85149]/50 transition-all"
+                >
+                  <svg className="w-4 h-4 text-[#f85149]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                  <span className="text-sm text-[#e6edf3]">PDF</span>
+                </button>
+                <button
+                  onClick={exportToExcel}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#21262d] border border-[#30363d] hover:border-[#3fb950]/50 transition-all"
+                >
+                  <svg className="w-4 h-4 text-[#3fb950]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span className="text-sm text-[#e6edf3]">Excel</span>
+                </button>
+              </div>
+            )}
+
+            {/* Import */}
             <button
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-[#3fb950] to-[#238636] text-white font-medium hover:opacity-90 transition-all glow-green"
             >
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-                />
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
               </svg>
-              <span className="text-sm">Import Data</span>
+              <span className="text-sm">Import</span>
             </button>
             <input
               ref={fileInputRef}
               type="file"
               accept=".csv,.xlsx,.xls"
+              multiple
               onChange={handleFileUpload}
               className="hidden"
             />
@@ -219,179 +538,218 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 flex max-w-7xl mx-auto w-full">
-        {/* Sidebar - Data Preview */}
-        <aside className="w-80 border-r border-[#30363d] bg-[#161b22] p-4 hidden lg:block">
-          <div className="sticky top-4 space-y-4">
-            <h2 className="text-sm font-semibold text-[#8b949e] uppercase tracking-wider flex items-center gap-2">
-              <svg
-                className="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                />
-              </svg>
-              Data Overview
-            </h2>
-
-            {dataPreview ? (
-              <div className="space-y-3">
-                {/* File Info */}
-                <div className="glass rounded-xl p-4">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-lg bg-[#3fb950]/10 flex items-center justify-center">
-                      <svg
-                        className="w-5 h-5 text-[#3fb950]"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                        />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-white truncate max-w-[150px]">
-                        {fileName}
-                      </p>
-                      <p className="text-xs text-[#8b949e]">CSV Data File</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-[#0d1117] rounded-lg p-2 text-center">
-                      <p className="text-lg font-bold text-[#3fb950]">
-                        {dataPreview.rows.toLocaleString()}
-                      </p>
-                      <p className="text-xs text-[#8b949e]">Records</p>
-                    </div>
-                    <div className="bg-[#0d1117] rounded-lg p-2 text-center">
-                      <p className="text-lg font-bold text-[#d4a853]">
-                        {dataPreview.columns.length}
-                      </p>
-                      <p className="text-xs text-[#8b949e]">Fields</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Columns */}
-                <div className="glass rounded-xl p-4">
-                  <p className="text-xs text-[#8b949e] uppercase tracking-wider mb-3">
-                    Data Fields
-                  </p>
-                  <div className="space-y-2 max-h-48 overflow-y-auto">
-                    {dataPreview.columns.map((col, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center gap-2 text-sm"
-                      >
-                        <div className="w-1.5 h-1.5 rounded-full bg-[#3fb950]"></div>
-                        <span className="text-[#e6edf3]">{col.trim()}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Preview Table */}
-                <div className="glass rounded-xl overflow-hidden">
-                  <div className="px-4 py-3 border-b border-[#30363d]">
-                    <p className="text-xs text-[#8b949e] uppercase tracking-wider">
-                      Data Preview
-                    </p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-[#0d1117]">
-                          {dataPreview.columns.slice(0, 3).map((col, i) => (
-                            <th
-                              key={i}
-                              className="px-3 py-2 text-left text-[#8b949e] font-medium"
-                            >
-                              {col.trim().slice(0, 10)}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dataPreview.preview.slice(0, 4).map((row, i) => (
-                          <tr
-                            key={i}
-                            className="border-t border-[#30363d]"
-                          >
-                            {row.slice(0, 3).map((cell, j) => (
-                              <td
-                                key={j}
-                                className="px-3 py-2 text-[#e6edf3] font-mono"
-                              >
-                                {cell.trim().slice(0, 10)}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
+      {/* History Panel */}
+      {showHistory && (
+        <div className="border-b border-[#30363d] bg-[#161b22] p-4 animate-fade-in">
+          <div className="max-w-7xl mx-auto">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-[#e6edf3]">Analysis History</h3>
+              {history.length > 0 && (
+                <button onClick={clearHistory} className="text-xs text-[#f85149] hover:underline">
+                  Clear All
+                </button>
+              )}
+            </div>
+            {history.length === 0 ? (
+              <p className="text-sm text-[#8b949e]">No history yet. Your analyses will be saved here.</p>
             ) : (
-              <div className="glass rounded-xl p-8 text-center">
-                <div className="w-16 h-16 rounded-2xl bg-[#238636]/10 flex items-center justify-center mx-auto mb-4">
-                  <svg
-                    className="w-8 h-8 text-[#3fb950]"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                {history.slice(0, 9).map((entry) => (
+                  <button
+                    key={entry.id}
+                    onClick={() => loadFromHistory(entry)}
+                    className="text-left p-3 rounded-lg bg-[#21262d] hover:bg-[#30363d] transition-all"
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                </div>
-                <p className="text-sm text-[#8b949e] mb-3">
-                  Import your financial data
-                </p>
-                <p className="text-xs text-[#484f58]">
-                  Supports CSV, XLSX files
-                </p>
+                    <div className="text-xs text-[#8b949e] mb-1">{entry.fileName}</div>
+                    <div className="text-sm text-[#e6edf3] truncate">{entry.question}</div>
+                    <div className="text-xs text-[#484f58] mt-1">
+                      {new Date(entry.timestamp).toLocaleString()}
+                    </div>
+                  </button>
+                ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
 
-            {/* Quick Stats Placeholder */}
-            <div className="glass rounded-xl p-4">
-              <p className="text-xs text-[#8b949e] uppercase tracking-wider mb-3">
-                Analysis Tools
-              </p>
-              <div className="space-y-2">
-                {[
-                  { icon: "📊", label: "Trend Analysis" },
-                  { icon: "💰", label: "Profitability" },
-                  { icon: "📈", label: "Growth Metrics" },
-                  { icon: "📉", label: "Risk Assessment" },
-                ].map((tool, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#0d1117] text-sm text-[#8b949e]"
+      {/* Charts Panel */}
+      {showCharts && chartData.length > 0 && (
+        <div className="border-b border-[#30363d] bg-[#161b22] p-4 animate-fade-in">
+          <div className="max-w-7xl mx-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-[#e6edf3]">Data Visualization</h3>
+              <div className="flex gap-2">
+                {(["bar", "line", "pie"] as const).map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setChartType(type)}
+                    className={`px-3 py-1 rounded-lg text-xs transition-all ${
+                      chartType === type
+                        ? "bg-[#3fb950] text-white"
+                        : "bg-[#21262d] text-[#8b949e] hover:bg-[#30363d]"
+                    }`}
                   >
-                    <span>{tool.icon}</span>
-                    <span>{tool.label}</span>
-                  </div>
+                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                  </button>
                 ))}
               </div>
             </div>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                {chartType === "bar" ? (
+                  <BarChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
+                    <XAxis dataKey="name" stroke="#8b949e" fontSize={12} />
+                    <YAxis stroke="#8b949e" fontSize={12} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}
+                    />
+                    <Legend />
+                    {Object.keys(chartData[0] || {})
+                      .filter((k) => k !== "name")
+                      .map((key, i) => (
+                        <Bar key={key} dataKey={key} fill={COLORS[i % COLORS.length]} />
+                      ))}
+                  </BarChart>
+                ) : chartType === "line" ? (
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
+                    <XAxis dataKey="name" stroke="#8b949e" fontSize={12} />
+                    <YAxis stroke="#8b949e" fontSize={12} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}
+                    />
+                    <Legend />
+                    {Object.keys(chartData[0] || {})
+                      .filter((k) => k !== "name")
+                      .map((key, i) => (
+                        <Line
+                          key={key}
+                          type="monotone"
+                          dataKey={key}
+                          stroke={COLORS[i % COLORS.length]}
+                          strokeWidth={2}
+                        />
+                      ))}
+                  </LineChart>
+                ) : (
+                  <PieChart>
+                    <Pie
+                      data={chartData.map((d) => ({
+                        name: d.name as string,
+                        value: Number(Object.values(d).find((v) => typeof v === "number") || 0),
+                      }))}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={80}
+                      fill="#3fb950"
+                      dataKey="value"
+                      label
+                    >
+                      {chartData.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}
+                    />
+                    <Legend />
+                  </PieChart>
+                )}
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Main Content */}
+      <main className="flex-1 flex max-w-7xl mx-auto w-full">
+        {/* Sidebar - Files & Data */}
+        <aside className="w-80 border-r border-[#30363d] bg-[#161b22] p-4 hidden lg:block overflow-y-auto">
+          <div className="space-y-4">
+            <h2 className="text-sm font-semibold text-[#8b949e] uppercase tracking-wider flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
+              </svg>
+              Uploaded Files ({files.length})
+            </h2>
+
+            {files.length === 0 ? (
+              <div className="glass rounded-xl p-6 text-center">
+                <div className="w-12 h-12 rounded-full bg-[#238636]/10 flex items-center justify-center mx-auto mb-3">
+                  <svg className="w-6 h-6 text-[#3fb950]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                </div>
+                <p className="text-sm text-[#8b949e]">Drop CSV files here or click Import</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {files.map((file) => (
+                  <div
+                    key={file.id}
+                    onClick={() => setActiveFileId(file.id)}
+                    className={`p-3 rounded-xl cursor-pointer transition-all ${
+                      activeFileId === file.id
+                        ? "bg-[#3fb950]/20 border border-[#3fb950]/50"
+                        : "glass hover:bg-[#21262d]"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-2">
+                        <svg className="w-5 h-5 text-[#3fb950]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <div>
+                          <p className="text-sm font-medium text-[#e6edf3] truncate max-w-[150px]">
+                            {file.name}
+                          </p>
+                          <p className="text-xs text-[#8b949e]">
+                            {file.rows} rows × {file.columns.length} cols
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeFile(file.id);
+                        }}
+                        className="text-[#8b949e] hover:text-[#f85149] transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {files.length >= 2 && (
+                  <button
+                    onClick={compareFiles}
+                    className="w-full mt-2 px-4 py-2 rounded-lg bg-[#d4a853]/20 border border-[#d4a853]/50 text-[#d4a853] text-sm font-medium hover:bg-[#d4a853]/30 transition-all"
+                  >
+                    ⚖️ Compare All Files
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Active File Details */}
+            {activeFile && (
+              <div className="glass rounded-xl p-4 mt-4">
+                <p className="text-xs text-[#8b949e] uppercase tracking-wider mb-3">Data Fields</p>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {activeFile.columns.map((col, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      <div className="w-1.5 h-1.5 rounded-full bg-[#3fb950]"></div>
+                      <span className="text-[#e6edf3]">{col}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </aside>
 
@@ -401,49 +759,19 @@ export default function Home() {
           <div className="flex-1 overflow-y-auto p-6 space-y-4">
             {messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center px-6">
-                {/* Hero */}
                 <div className="relative mb-8">
                   <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-[#3fb950] to-[#238636] flex items-center justify-center glow-green">
-                    <svg
-                      className="w-12 h-12 text-white"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={1.5}
-                        d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-                      />
-                    </svg>
-                  </div>
-                  <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-lg bg-[#d4a853] flex items-center justify-center">
-                    <svg
-                      className="w-4 h-4 text-white"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M13 10V3L4 14h7v7l9-11h-7z"
-                      />
+                    <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                     </svg>
                   </div>
                 </div>
 
-                <h2 className="text-3xl font-bold text-white mb-3">
-                  Financial Analysis Agent
-                </h2>
+                <h2 className="text-3xl font-bold text-white mb-3">Financial Analysis Agent</h2>
                 <p className="text-[#8b949e] max-w-lg mb-8">
-                  Upload your financial data and get AI-powered insights,
-                  trends, and recommendations in seconds.
+                  Upload your financial data and get AI-powered insights, trends, and recommendations.
                 </p>
 
-                {/* Sample Questions */}
                 <div className="grid grid-cols-2 gap-3 max-w-xl">
                   {sampleQuestions.map((q, i) => (
                     <button
@@ -459,29 +787,26 @@ export default function Home() {
                   ))}
                 </div>
 
-                {/* Features */}
                 <div className="flex items-center gap-6 mt-12 text-xs text-[#484f58]">
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-[#3fb950]"></div>
-                    <span>Instant Analysis</span>
+                    <span>Multiple Files</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-[#d4a853]"></div>
-                    <span>Smart Insights</span>
+                    <span>Auto Charts</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-[#58a6ff]"></div>
-                    <span>Secure & Private</span>
+                    <span>Export Reports</span>
                   </div>
                 </div>
               </div>
             ) : (
-              messages.map((msg, i) => (
+              messages.map((msg) => (
                 <div
-                  key={i}
-                  className={`flex ${
-                    msg.role === "user" ? "justify-end" : "justify-start"
-                  } animate-fade-in`}
+                  key={msg.id}
+                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-fade-in`}
                 >
                   <div
                     className={`max-w-[75%] rounded-2xl px-5 py-4 ${
@@ -493,28 +818,19 @@ export default function Home() {
                     {msg.role === "assistant" && (
                       <div className="flex items-center gap-2 mb-2 pb-2 border-b border-[#30363d]">
                         <div className="w-5 h-5 rounded bg-[#3fb950]/20 flex items-center justify-center">
-                          <svg
-                            className="w-3 h-3 text-[#3fb950]"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-                            />
+                          <svg className="w-3 h-3 text-[#3fb950]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                           </svg>
                         </div>
-                        <span className="text-xs text-[#3fb950] font-medium">
-                          FinanceAI
-                        </span>
+                        <span className="text-xs text-[#3fb950] font-medium">FinanceAI</span>
+                        {msg.model && (
+                          <span className="text-xs text-[#8b949e]">
+                            • {AI_MODELS.find((m) => m.id === msg.model)?.name}
+                          </span>
+                        )}
                       </div>
                     )}
-                    <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                      {msg.content}
-                    </div>
+                    <div className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</div>
                   </div>
                 </div>
               ))
@@ -525,18 +841,8 @@ export default function Home() {
                 <div className="glass rounded-2xl px-5 py-4">
                   <div className="flex items-center gap-3">
                     <div className="w-5 h-5 rounded bg-[#3fb950]/20 flex items-center justify-center">
-                      <svg
-                        className="w-3 h-3 text-[#3fb950] animate-pulse"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-                        />
+                      <svg className="w-3 h-3 text-[#3fb950] animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                       </svg>
                     </div>
                     <div className="flex gap-1">
@@ -558,18 +864,8 @@ export default function Home() {
             <div className="max-w-3xl mx-auto flex gap-3">
               <div className="flex-1 relative">
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#484f58]">
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
-                    />
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
                   </svg>
                 </div>
                 <input
@@ -577,38 +873,24 @@ export default function Home() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-                  placeholder={
-                    dataPreview
-                      ? "Ask about your financial data..."
-                      : "Import data to start analysis..."
-                  }
-                  disabled={!dataPreview || isLoading}
+                  placeholder={files.length > 0 ? "Ask about your financial data..." : "Import data to start analysis..."}
+                  disabled={files.length === 0 || isLoading}
                   className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl pl-12 pr-4 py-4 text-white placeholder-[#484f58] focus:outline-none focus:border-[#3fb950]/50 focus:ring-1 focus:ring-[#3fb950]/20 disabled:opacity-50 transition-all"
                 />
               </div>
               <button
                 onClick={sendMessage}
-                disabled={!input.trim() || isLoading || !dataPreview}
+                disabled={!input.trim() || isLoading || files.length === 0}
                 className="px-6 py-4 rounded-xl bg-gradient-to-r from-[#3fb950] to-[#238636] text-white font-medium hover:opacity-90 transition-all glow-green disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 <span>Analyze</span>
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M14 5l7 7m0 0l-7 7m7-7H3"
-                  />
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
                 </svg>
               </button>
             </div>
             <p className="text-center text-xs text-[#484f58] mt-3">
-              Powered by AI • Your data stays private • Free to use
+              Powered by AI • Multiple Models • Export Reports • Free
             </p>
           </div>
         </div>
