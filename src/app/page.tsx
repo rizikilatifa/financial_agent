@@ -20,6 +20,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
+import StockLookup from "@/components/StockLookup";
 
 interface Message {
   id: string;
@@ -352,6 +353,32 @@ export default function Home() {
     localStorage.removeItem("financeAnalysisHistory");
   };
 
+  const handleAddStockToAnalysis = (stockData: string) => {
+    // Create a virtual file with the stock data
+    const newFile: DataFile = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      name: `Stock Data (${new Date().toLocaleDateString()}).csv`,
+      data: stockData,
+      columns: ["Metric", "Value"],
+      rows: stockData.split("\n").length,
+      preview: [],
+      parsedData: [],
+    };
+
+    setFiles((prev) => [...prev, newFile]);
+    setActiveFileId(newFile.id);
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: `📈 **Stock data added to analysis!**\n\nYou can now ask questions about this stock data, or combine it with other files for comparison.`,
+        timestamp: new Date(),
+      },
+    ]);
+  };
+
   const compareFiles = async () => {
     if (files.length < 2) {
       setMessages((prev) => [
@@ -474,6 +501,9 @@ export default function Home() {
               </svg>
               <span className="text-sm text-[#e6edf3]">History</span>
             </button>
+
+            {/* Stock Lookup */}
+            <StockLookup onAddToAnalysis={handleAddStockToAnalysis} />
 
             {/* Charts Toggle */}
             {chartData.length > 0 && (
