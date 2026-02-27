@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const OPENROUTER_API_KEY =
-  "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";
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 export async function POST(request: NextRequest) {
