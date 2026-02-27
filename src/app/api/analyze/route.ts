@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,12 +21,7 @@ export async function POST(request: NextRequest) {
 
     if (isComparison) {
       // Multi-file comparison prompt
-      prompt = `You are a professional financial analyst. Your job is to ANALYZE data and provide INSIGHTS in plain English.
-
-DO NOT write code. DO NOT write Python. DO NOT write scripts.
-Instead, provide a text-based analysis with your findings.
-
-Compare the following datasets:
+      prompt = `You are a professional financial analyst. Compare the following datasets and provide insights.
 
 ${allFiles.map((f: { name: string; data: string }, i: number) => `
 --- FILE ${i + 1}: ${f.name} ---
@@ -35,53 +30,45 @@ ${f.data}
 
 QUESTION: ${question}
 
-Provide your analysis as a human-readable report with:
-1. **Summary** - Key differences between datasets
-2. **Performance** - Which dataset performs better and why
-3. **Trends** - Notable patterns in each dataset
-4. **Recommendations** - Actionable insights
+IMPORTANT: Provide a detailed text analysis, NOT code. Include:
+1. Key differences between datasets
+2. Performance comparison
+3. Notable trends in each dataset
+4. Recommendations
 
-Use markdown formatting (bold, lists, tables) but NO CODE BLOCKS.`;
+Format your response with markdown (tables, bullet points, bold text).`;
     } else {
       // Single file analysis prompt
-      prompt = `You are a professional financial analyst. Your job is to ANALYZE data and provide INSIGHTS in plain English.
-
-IMPORTANT RULES:
-- DO NOT write code
-- DO NOT write Python scripts
-- DO NOT show calculations in code format
-- Instead, EXPLAIN your findings in plain English
-- Use markdown for formatting (bold, lists, tables)
-
-Analyze this financial data:
+      prompt = `You are a professional financial analyst. Analyze the following data and answer the question.
 
 FILE: ${fileName || "data.csv"}
 
-DATA:
+DATA (CSV format):
 ${data}
 
 QUESTION: ${question}
 
-Provide your analysis as a professional report:
-1. **Key Findings** - What the data shows
-2. **Metrics** - Important numbers and what they mean
-3. **Trends** - Patterns you observe
-4. **Recommendations** - What actions to take
+IMPORTANT INSTRUCTIONS:
+- Provide a TEXT analysis, NOT code or Python scripts
+- Answer in plain English with clear explanations
+- Use markdown formatting (tables, bullet points, bold text)
+- Include specific numbers and percentages from the data
+- Highlight key insights and trends
 
-Write in clear, simple language that a business person can understand.`;
+DO NOT write code. DO NOT write Python scripts. Provide a written analysis.`;
     }
 
-    const response = await fetch(OPENROUTER_URL, {
+    const response = await fetch(GROQ_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        Authorization: `Bearer ${GROQ_API_KEY}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com",
-        "X-Title": "Financial Agent",
       },
       body: JSON.stringify({
-        model: model || "google/gemma-3n-e2b-it:free",
+        model: "llama-3.3-70b-versatile",
         messages: [{ role: "user", content: prompt }],
+        temperature: 0.7,
+        max_tokens: 2048,
       }),
     });
 

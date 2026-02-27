@@ -50,11 +50,11 @@ interface AnalysisHistory {
 }
 
 const AI_MODELS = [
-  { id: "google/gemma-3n-e2b-it:free", name: "Gemma 3N", description: "Fast & efficient" },
-  { id: "qwen/qwen3-coder:free", name: "Qwen 3 Coder", description: "Great for analysis" },
-  { id: "openrouter/free", name: "Auto Select", description: "Best available" },
-  { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B", description: "Most powerful" },
-  { id: "mistralai/mistral-nemo:free", name: "Mistral Nemo", description: "Balanced" },
+  { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B", description: "Most powerful" },
+  { id: "llama-3.1-70b-versatile", name: "Llama 3.1 70B", description: "Fast & smart" },
+  { id: "llama-3.1-8b-instant", name: "Llama 3.1 8B", description: "Ultra fast" },
+  { id: "gemma2-9b-it", name: "Gemma 2 9B", description: "Balanced" },
+  { id: "mixtral-8x7b-32768", name: "Mixtral 8x7B", description: "Complex analysis" },
 ];
 
 const COLORS = ["#3fb950", "#d4a853", "#58a6ff", "#f85149", "#a371f7", "#3fb950"];
