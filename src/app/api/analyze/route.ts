@@ -3,12 +3,16 @@ import { NextRequest, NextResponse } from "next/server";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 export async function POST(request: NextRequest) {
-  // Read API key at runtime (not build time)
+  // Read API key at runtime
   const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+
+  // Debug: Check if key exists (don't expose the actual key)
+  console.log("API Key exists:", !!GROQ_API_KEY);
+  console.log("API Key length:", GROQ_API_KEY.length);
 
   if (!GROQ_API_KEY) {
     return NextResponse.json(
-      { error: "API key not configured. Please add GROQ_API_KEY to Vercel environment variables." },
+      { error: "GROQ_API_KEY environment variable is not set on Vercel. Please add it in Settings > Environment Variables." },
       { status: 500 }
     );
   }
@@ -83,8 +87,9 @@ DO NOT write code. DO NOT write Python scripts. Provide a written analysis.`;
 
     if (!response.ok) {
       const errorData = await response.json();
+      console.log("Groq API Error:", JSON.stringify(errorData));
       return NextResponse.json(
-        { error: errorData.error?.message || "API request failed" },
+        { error: `${errorData.error?.message || "API request failed"} (Key length: ${GROQ_API_KEY.length})` },
         { status: response.status }
       );
     }
