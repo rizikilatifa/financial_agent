@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 export async function POST(request: NextRequest) {
+  // Read API key at runtime (not build time)
+  const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
+
+  if (!GROQ_API_KEY) {
+    return NextResponse.json(
+      { error: "API key not configured. Please add GROQ_API_KEY to Vercel environment variables." },
+      { status: 500 }
+    );
+  }
+
   try {
     const { question, data, fileName, model, allFiles } = await request.json();
 
