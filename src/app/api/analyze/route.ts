@@ -79,12 +79,26 @@ IMPORTANT: Provide a detailed text analysis, NOT code. Include:
 3. Notable trends in each dataset
 4. Recommendations
 
-Format your response with markdown (tables, bullet points, bold text).`;
+Format your response with markdown (tables, bullet points, bold text).
+
+If a visualization would help, include a JSON chart config at the end in this EXACT format:
+\`\`\`chart
+{
+  "type": "bar|line|pie|area|scatter|radar",
+  "title": "Chart Title",
+  "data": [{"name": "Label", "value": 100}, ...],
+  "xKey": "name",
+  "yKeys": ["value"]
+}
+\`\`\``;
     } else {
       // Single file analysis prompt
+      const headers = truncatedData.split("\n")[0]?.split(",").map(h => h.trim()) || [];
+
       prompt = `You are a professional financial analyst. Analyze the following data and answer the question.
 
 FILE: ${fileName || "data.csv"} ${dataInfo}
+COLUMNS: ${headers.join(", ")}
 
 DATA (CSV format):
 ${truncatedData}
@@ -98,7 +112,20 @@ IMPORTANT INSTRUCTIONS:
 - Include specific numbers and percentages from the data
 - Highlight key insights and trends
 
-DO NOT write code. DO NOT write Python scripts. Provide a written analysis.`;
+VISUALIZATION: If the question would benefit from a chart, include a JSON chart config at the end:
+\`\`\`chart
+{
+  "type": "bar|line|pie|area|scatter|radar",
+  "title": "Chart Title",
+  "data": [{"name": "Label", "value1": 100, "value2": 200}, ...],
+  "xKey": "name",
+  "yKeys": ["value1", "value2"]
+}
+\`\`\`
+
+Use "bar" for comparisons, "line" for trends over time, "pie" for proportions, "area" for cumulative values, "scatter" for correlations, "radar" for multi-dimensional comparisons.
+
+DO NOT write Python code. Provide text analysis with optional chart JSON.`;
     }
 
     const response = await fetch(GROQ_URL, {
@@ -127,7 +154,21 @@ DO NOT write code. DO NOT write Python scripts. Provide a written analysis.`;
     const result = await response.json();
     const aiResponse = result.choices?.[0]?.message?.content || "No response";
 
-    return NextResponse.json({ response: aiResponse });
+    // Extract chart config if present
+    let chartConfig = null;
+    let cleanResponse = aiResponse;
+
+    const chartMatch = aiResponse.match(/```chart\s*([\s\S]*?)```/);
+    if (chartMatch) {
+      try {
+        chartConfig = JSON.parse(chartMatch[1].trim());
+        cleanResponse = aiResponse.replace(/```chart[\s\S]*?```/, "").trim();
+      } catch (e) {
+        console.error("Failed to parse chart config:", e);
+      }
+    }
+
+    return NextResponse.json({ response: cleanResponse, chart: chartConfig });
   } catch (error) {
     console.error("Analysis error:", error);
     return NextResponse.json(

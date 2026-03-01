@@ -8,6 +8,15 @@ import {
   Bar,
   PieChart,
   Pie,
+  AreaChart,
+  Area,
+  ScatterChart,
+  Scatter,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
   Cell,
   XAxis,
   YAxis,
@@ -23,12 +32,21 @@ import { saveAs } from "file-saver";
 import StockLookup from "@/components/StockLookup";
 import StyledMarkdown from "@/components/StyledMarkdown";
 
+interface ChartConfig {
+  type: "bar" | "line" | "pie" | "area" | "scatter" | "radar";
+  title: string;
+  data: Record<string, unknown>[];
+  xKey?: string;
+  yKeys?: string[];
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
   model?: string;
+  chart?: ChartConfig;
 }
 
 interface DataFile {
@@ -58,7 +76,16 @@ const AI_MODELS = [
   { id: "mixtral-8x7b-32768", name: "Mixtral 8x7B", description: "Complex analysis" },
 ];
 
-const COLORS = ["#3fb950", "#d4a853", "#58a6ff", "#f85149", "#a371f7", "#3fb950"];
+const COLORS = ["#3fb950", "#d4a853", "#58a6ff", "#f85149", "#a371f7", "#238636", "#f78166"];
+
+const CHART_TYPES = [
+  { id: "bar", name: "Bar", icon: "📊" },
+  { id: "line", name: "Line", icon: "📈" },
+  { id: "area", name: "Area", icon: "📉" },
+  { id: "pie", name: "Pie", icon: "🥧" },
+  { id: "scatter", name: "Scatter", icon: "⚬" },
+  { id: "radar", name: "Radar", icon: "🎯" },
+];
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -71,8 +98,9 @@ export default function Home() {
   const [history, setHistory] = useState<AnalysisHistory[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [chartData, setChartData] = useState<Record<string, unknown>[]>([]);
-  const [chartType, setChartType] = useState<"bar" | "line" | "pie">("bar");
+  const [chartType, setChartType] = useState<"bar" | "line" | "pie" | "area" | "scatter" | "radar">("bar");
   const [showCharts, setShowCharts] = useState(false);
+  const [aiChart, setAiChart] = useState<ChartConfig | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -213,9 +241,16 @@ export default function Home() {
         content: data.error ? `❌ Error: ${data.error}` : data.response,
         timestamp: new Date(),
         model: selectedModel,
+        chart: data.chart || undefined,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
+
+      // If AI generated a chart, show it
+      if (data.chart) {
+        setAiChart(data.chart);
+        setShowCharts(true);
+      }
 
       // Save to history
       if (!data.error) {
@@ -605,85 +640,142 @@ export default function Home() {
       )}
 
       {/* Charts Panel */}
-      {showCharts && chartData.length > 0 && (
+      {showCharts && (chartData.length > 0 || aiChart) && (
         <div className="border-b border-[#30363d] bg-[#161b22] p-4 animate-fade-in">
           <div className="max-w-7xl mx-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-[#e6edf3]">Data Visualization</h3>
+              <h3 className="text-sm font-semibold text-[#e6edf3]">
+                {aiChart ? `📊 ${aiChart.title || "AI-Generated Chart"}` : "Data Visualization"}
+              </h3>
               <div className="flex gap-2">
-                {(["bar", "line", "pie"] as const).map((type) => (
+                {CHART_TYPES.map((type) => (
                   <button
-                    key={type}
-                    onClick={() => setChartType(type)}
-                    className={`px-3 py-1 rounded-lg text-xs transition-all ${
-                      chartType === type
+                    key={type.id}
+                    onClick={() => setChartType(type.id as typeof chartType)}
+                    className={`px-3 py-1 rounded-lg text-xs transition-all flex items-center gap-1 ${
+                      chartType === type.id
                         ? "bg-[#3fb950] text-white"
                         : "bg-[#21262d] text-[#8b949e] hover:bg-[#30363d]"
                     }`}
                   >
-                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                    <span>{type.icon}</span>
+                    <span>{type.name}</span>
                   </button>
                 ))}
               </div>
             </div>
-            <div className="h-64">
+            <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 {chartType === "bar" ? (
-                  <BarChart data={chartData}>
+                  <BarChart data={aiChart?.data || chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
-                    <XAxis dataKey="name" stroke="#8b949e" fontSize={12} />
+                    <XAxis dataKey={aiChart?.xKey || "name"} stroke="#8b949e" fontSize={12} />
                     <YAxis stroke="#8b949e" fontSize={12} />
                     <Tooltip
-                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}
+                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d", borderRadius: "8px" }}
                     />
                     <Legend />
-                    {Object.keys(chartData[0] || {})
-                      .filter((k) => k !== "name")
-                      .map((key, i) => (
-                        <Bar key={key} dataKey={key} fill={COLORS[i % COLORS.length]} />
-                      ))}
+                    {(aiChart?.yKeys || Object.keys((aiChart?.data || chartData)[0] || {}).filter((k) => k !== (aiChart?.xKey || "name"))).map((key: string, i: number) => (
+                      <Bar key={key} dataKey={key} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} />
+                    ))}
                   </BarChart>
                 ) : chartType === "line" ? (
-                  <LineChart data={chartData}>
+                  <LineChart data={aiChart?.data || chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
-                    <XAxis dataKey="name" stroke="#8b949e" fontSize={12} />
+                    <XAxis dataKey={aiChart?.xKey || "name"} stroke="#8b949e" fontSize={12} />
                     <YAxis stroke="#8b949e" fontSize={12} />
                     <Tooltip
-                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}
+                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d", borderRadius: "8px" }}
                     />
                     <Legend />
-                    {Object.keys(chartData[0] || {})
-                      .filter((k) => k !== "name")
-                      .map((key, i) => (
-                        <Line
-                          key={key}
-                          type="monotone"
-                          dataKey={key}
-                          stroke={COLORS[i % COLORS.length]}
-                          strokeWidth={2}
-                        />
-                      ))}
+                    {(aiChart?.yKeys || Object.keys((aiChart?.data || chartData)[0] || {}).filter((k) => k !== (aiChart?.xKey || "name"))).map((key: string, i: number) => (
+                      <Line
+                        key={key}
+                        type="monotone"
+                        dataKey={key}
+                        stroke={COLORS[i % COLORS.length]}
+                        strokeWidth={2}
+                        dot={{ fill: COLORS[i % COLORS.length], strokeWidth: 2 }}
+                      />
+                    ))}
                   </LineChart>
+                ) : chartType === "area" ? (
+                  <AreaChart data={aiChart?.data || chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
+                    <XAxis dataKey={aiChart?.xKey || "name"} stroke="#8b949e" fontSize={12} />
+                    <YAxis stroke="#8b949e" fontSize={12} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d", borderRadius: "8px" }}
+                    />
+                    <Legend />
+                    {(aiChart?.yKeys || Object.keys((aiChart?.data || chartData)[0] || {}).filter((k) => k !== (aiChart?.xKey || "name"))).map((key: string, i: number) => (
+                      <Area
+                        key={key}
+                        type="monotone"
+                        dataKey={key}
+                        fill={COLORS[i % COLORS.length]}
+                        stroke={COLORS[i % COLORS.length]}
+                        fillOpacity={0.3}
+                      />
+                    ))}
+                  </AreaChart>
+                ) : chartType === "scatter" ? (
+                  <ScatterChart>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
+                    <XAxis dataKey={aiChart?.xKey || "name"} stroke="#8b949e" fontSize={12} />
+                    <YAxis dataKey={aiChart?.yKeys?.[0] || "value"} stroke="#8b949e" fontSize={12} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d", borderRadius: "8px" }}
+                    />
+                    <Legend />
+                    <Scatter
+                      name="Data"
+                      data={aiChart?.data || chartData}
+                      fill="#3fb950"
+                    />
+                  </ScatterChart>
+                ) : chartType === "radar" ? (
+                  <RadarChart data={aiChart?.data || chartData}>
+                    <PolarGrid stroke="#30363d" />
+                    <PolarAngleAxis dataKey={aiChart?.xKey || "name"} stroke="#8b949e" fontSize={12} />
+                    <PolarRadiusAxis stroke="#8b949e" />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d", borderRadius: "8px" }}
+                    />
+                    <Legend />
+                    {(aiChart?.yKeys || Object.keys((aiChart?.data || chartData)[0] || {}).filter((k) => k !== (aiChart?.xKey || "name"))).map((key: string, i: number) => (
+                      <Radar
+                        key={key}
+                        name={key}
+                        dataKey={key}
+                        stroke={COLORS[i % COLORS.length]}
+                        fill={COLORS[i % COLORS.length]}
+                        fillOpacity={0.3}
+                      />
+                    ))}
+                  </RadarChart>
                 ) : (
                   <PieChart>
                     <Pie
-                      data={chartData.map((d) => ({
-                        name: d.name as string,
-                        value: Number(Object.values(d).find((v) => typeof v === "number") || 0),
+                      data={(aiChart?.data || chartData).map((d: Record<string, unknown>) => ({
+                        name: String(d[aiChart?.xKey || "name"] || ""),
+                        value: Number(d[aiChart?.yKeys?.[0] || Object.values(d).find((v) => typeof v === "number") || 0),
                       }))}
                       cx="50%"
                       cy="50%"
-                      outerRadius={80}
+                      outerRadius={100}
+                      innerRadius={40}
                       fill="#3fb950"
                       dataKey="value"
-                      label
+                      label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                      labelLine={{ stroke: "#8b949e" }}
                     >
-                      {chartData.map((_, index) => (
+                      {(aiChart?.data || chartData).map((_: Record<string, unknown>, index: number) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d" }}
+                      contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d", borderRadius: "8px" }}
                     />
                     <Legend />
                   </PieChart>
@@ -862,6 +954,76 @@ export default function Home() {
                       </div>
                     )}
                     <StyledMarkdown content={msg.content} />
+                    {/* Inline Chart */}
+                    {msg.chart && (
+                      <div className="mt-4 pt-4 border-t border-[#30363d]">
+                        <p className="text-xs text-[#8b949e] mb-2">📊 {msg.chart.title || "Visualization"}</p>
+                        <div className="h-48 w-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            {msg.chart.type === "bar" ? (
+                              <BarChart data={msg.chart.data}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
+                                <XAxis dataKey={msg.chart.xKey || "name"} stroke="#8b949e" fontSize={10} />
+                                <YAxis stroke="#8b949e" fontSize={10} />
+                                <Tooltip contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d", borderRadius: "4px" }} />
+                                {(msg.chart.yKeys || ["value"]).map((key: string, i: number) => (
+                                  <Bar key={key} dataKey={key} fill={COLORS[i % COLORS.length]} radius={[2, 2, 0, 0]} />
+                                ))}
+                              </BarChart>
+                            ) : msg.chart.type === "line" ? (
+                              <LineChart data={msg.chart.data}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
+                                <XAxis dataKey={msg.chart.xKey || "name"} stroke="#8b949e" fontSize={10} />
+                                <YAxis stroke="#8b949e" fontSize={10} />
+                                <Tooltip contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d", borderRadius: "4px" }} />
+                                {(msg.chart.yKeys || ["value"]).map((key: string, i: number) => (
+                                  <Line key={key} type="monotone" dataKey={key} stroke={COLORS[i % COLORS.length]} strokeWidth={2} />
+                                ))}
+                              </LineChart>
+                            ) : msg.chart.type === "area" ? (
+                              <AreaChart data={msg.chart.data}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
+                                <XAxis dataKey={msg.chart.xKey || "name"} stroke="#8b949e" fontSize={10} />
+                                <YAxis stroke="#8b949e" fontSize={10} />
+                                <Tooltip contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d", borderRadius: "4px" }} />
+                                {(msg.chart.yKeys || ["value"]).map((key: string, i: number) => (
+                                  <Area key={key} type="monotone" dataKey={key} fill={COLORS[i % COLORS.length]} stroke={COLORS[i % COLORS.length]} fillOpacity={0.3} />
+                                ))}
+                              </AreaChart>
+                            ) : msg.chart.type === "radar" ? (
+                              <RadarChart data={msg.chart.data}>
+                                <PolarGrid stroke="#30363d" />
+                                <PolarAngleAxis dataKey={msg.chart.xKey || "name"} stroke="#8b949e" fontSize={10} />
+                                <PolarRadiusAxis stroke="#8b949e" />
+                                <Tooltip contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d", borderRadius: "4px" }} />
+                                {(msg.chart.yKeys || ["value"]).map((key: string, i: number) => (
+                                  <Radar key={key} dataKey={key} stroke={COLORS[i % COLORS.length]} fill={COLORS[i % COLORS.length]} fillOpacity={0.3} />
+                                ))}
+                              </RadarChart>
+                            ) : (
+                              <PieChart>
+                                <Pie
+                                  data={msg.chart.data.map((d: Record<string, unknown>) => ({
+                                    name: String(d[msg.chart.xKey || "name"] || ""),
+                                    value: Number(d[msg.chart.yKeys?.[0] || "value"] || 0),
+                                  }))}
+                                  cx="50%"
+                                  cy="50%"
+                                  outerRadius={60}
+                                  innerRadius={25}
+                                  dataKey="value"
+                                >
+                                  {msg.chart.data.map((_: Record<string, unknown>, i: number) => (
+                                    <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
+                                  ))}
+                                </Pie>
+                                <Tooltip contentStyle={{ backgroundColor: "#161b22", border: "1px solid #30363d", borderRadius: "4px" }} />
+                              </PieChart>
+                            )}
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
