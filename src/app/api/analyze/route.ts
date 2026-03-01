@@ -2,17 +2,35 @@ import { NextRequest, NextResponse } from "next/server";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
+// Truncate data to fit within token limits (roughly 8000 chars = ~2000 tokens)
+function truncateData(data: string, maxChars: number = 8000): string {
+  if (data.length <= maxChars) return data;
+
+  const lines = data.split("\n");
+  const header = lines[0];
+  const rows = lines.slice(1);
+
+  // Include header and as many rows as fit
+  let result = header + "\n";
+  let currentLength = header.length + 1;
+
+  for (const row of rows) {
+    if (currentLength + row.length + 1 > maxChars) break;
+    result += row + "\n";
+    currentLength += row.length + 1;
+  }
+
+  result += `\n[... truncated ${rows.length - result.split("\n").length + 2} more rows ...]`;
+  return result;
+}
+
 export async function POST(request: NextRequest) {
   // Read API key at runtime
   const GROQ_API_KEY = process.env.GROQ_API_KEY || "";
 
-  // Debug: Check if key exists (don't expose the actual key)
-  console.log("API Key exists:", !!GROQ_API_KEY);
-  console.log("API Key length:", GROQ_API_KEY.length);
-
   if (!GROQ_API_KEY) {
     return NextResponse.json(
-      { error: "GROQ_API_KEY environment variable is not set on Vercel. Please add it in Settings > Environment Variables." },
+      { error: "GROQ_API_KEY environment variable is not set on Vercel." },
       { status: 500 }
     );
   }
@@ -27,16 +45,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Truncate data to avoid token limits
+    const truncatedData = truncateData(data);
+    const totalRows = data.split("\n").length - 1;
+    const dataInfo = totalRows > 50
+      ? `(${totalRows} total rows - showing sample)`
+      : `(${totalRows} rows)`;
+
     // Check if this is a comparison request
     const isComparison = question.toLowerCase().includes("compare") && allFiles && allFiles.length > 1;
 
     let prompt: string;
 
     if (isComparison) {
-      // Multi-file comparison prompt
+      // Multi-file comparison prompt - truncate each file
+      const truncatedFiles = allFiles.map((f: { name: string; data: string }) => ({
+        name: f.name,
+        data: truncateData(f.data, 4000) // Smaller limit for each file in comparison
+      }));
+
       prompt = `You are a professional financial analyst. Compare the following datasets and provide insights.
 
-${allFiles.map((f: { name: string; data: string }, i: number) => `
+${truncatedFiles.map((f: { name: string; data: string }, i: number) => `
 --- FILE ${i + 1}: ${f.name} ---
 ${f.data}
 `).join("\n")}
@@ -54,10 +84,10 @@ Format your response with markdown (tables, bullet points, bold text).`;
       // Single file analysis prompt
       prompt = `You are a professional financial analyst. Analyze the following data and answer the question.
 
-FILE: ${fileName || "data.csv"}
+FILE: ${fileName || "data.csv"} ${dataInfo}
 
 DATA (CSV format):
-${data}
+${truncatedData}
 
 QUESTION: ${question}
 
@@ -89,7 +119,7 @@ DO NOT write code. DO NOT write Python scripts. Provide a written analysis.`;
       const errorData = await response.json();
       console.log("Groq API Error:", JSON.stringify(errorData));
       return NextResponse.json(
-        { error: `${errorData.error?.message || "API request failed"} (Key length: ${GROQ_API_KEY.length})` },
+        { error: errorData.error?.message || "API request failed" },
         { status: response.status }
       );
     }
