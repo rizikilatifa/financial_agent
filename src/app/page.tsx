@@ -757,17 +757,22 @@ export default function Home() {
                 ) : (
                   <PieChart>
                     <Pie
-                      data={(aiChart?.data || chartData).map((d: Record<string, unknown>) => ({
-                        name: String(d[aiChart?.xKey || "name"] || ""),
-                        value: Number(d[aiChart?.yKeys?.[0] || Object.values(d).find((v) => typeof v === "number") || 0),
-                      }))}
+                      data={(aiChart?.data || chartData).map((d: Record<string, unknown>) => {
+                        const xKey = aiChart?.xKey || "name";
+                        const yKey = aiChart?.yKeys?.[0];
+                        const numVal = yKey ? d[yKey] : Object.values(d).find((v) => typeof v === "number");
+                        return {
+                          name: String(d[xKey] || ""),
+                          value: Number(numVal || 0),
+                        };
+                      })}
                       cx="50%"
                       cy="50%"
                       outerRadius={100}
                       innerRadius={40}
                       fill="#3fb950"
                       dataKey="value"
-                      label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                      label={({ name, percent }: { name: string; percent: number }) => `${name} (${(percent * 100).toFixed(0)}%)`}
                       labelLine={{ stroke: "#8b949e" }}
                     >
                       {(aiChart?.data || chartData).map((_: Record<string, unknown>, index: number) => (
