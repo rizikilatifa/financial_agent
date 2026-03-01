@@ -785,9 +785,9 @@ export default function Home() {
         </aside>
 
         {/* Chat Area */}
-        <div className="flex-1 flex flex-col bg-[#0d1117] grid-pattern">
+        <div className="flex-1 flex flex-col bg-[#0d1117] grid-pattern min-h-0">
           {/* Messages */}
-          <div className="flex-1 h-0 overflow-y-auto p-6 space-y-4">
+          <div className="flex-1 overflow-y-auto p-6 space-y-4 min-h-0">
             {messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center px-6">
                 <div className="relative mb-8">
