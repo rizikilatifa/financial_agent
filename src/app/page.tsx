@@ -413,7 +413,7 @@ export default function Home() {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#0d1117]">
+    <div className="h-screen flex flex-col overflow-hidden bg-[#0d1117]">
       {/* Stock Ticker Bar */}
       <div className="border-b border-[#30363d] bg-[#161b22] overflow-hidden">
         <div className="flex ticker-scroll whitespace-nowrap py-2">
@@ -695,9 +695,9 @@ export default function Home() {
       )}
 
       {/* Main Content */}
-      <main className="flex-1 flex max-w-7xl mx-auto w-full">
+      <main className="flex-1 flex max-w-7xl mx-auto w-full min-h-0">
         {/* Sidebar - Files & Data */}
-        <aside className="w-80 border-r border-[#30363d] bg-[#161b22] p-4 hidden lg:block overflow-y-auto">
+        <aside className="w-80 border-r border-[#30363d] bg-[#161b22] p-4 hidden lg:block flex-shrink-0 overflow-y-auto">
           <div className="space-y-4">
             <h2 className="text-sm font-semibold text-[#8b949e] uppercase tracking-wider flex items-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -891,7 +891,7 @@ export default function Home() {
           </div>
 
           {/* Input Area */}
-          <div className="border-t border-[#30363d] p-4 bg-[#161b22]">
+          <div className="flex-shrink-0 border-t border-[#30363d] p-4 bg-[#161b22]">
             <div className="max-w-3xl mx-auto flex gap-3">
               <div className="flex-1 relative">
                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#484f58]">
